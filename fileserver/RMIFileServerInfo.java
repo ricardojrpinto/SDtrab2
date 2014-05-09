@@ -15,7 +15,7 @@ public class RMIFileServerInfo
 	private Set<String> permittedUsers;
 
 
-	public RMIFileServerInfo(String servername, String username, String url) throws RemoteException{
+	public RMIFileServerInfo(String servername, String username, String url) throws RemoteException {
 		this.servername = servername;
 		this.username = username;
 		this.url = url;
