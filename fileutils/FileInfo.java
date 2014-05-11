@@ -1,6 +1,6 @@
 package fileutils;
 
-import java.util.*;
+import java.util.Date;
 
 public class FileInfo implements java.io.Serializable
 {
@@ -8,7 +8,9 @@ public class FileInfo implements java.io.Serializable
 
 	public String name;
 	public long length;
+	public String lengthStr;
 	public Date modified;
+	public String modifiedStr;
 	public boolean isFile;
 	
 	public FileInfo( String name, long length, Date modified, boolean isFile) {
@@ -18,7 +20,20 @@ public class FileInfo implements java.io.Serializable
 		this.isFile = isFile;
 	}
 	
+	public FileInfo( String name, String length, String modified, boolean isFile) {
+		this.name = name;
+		this.lengthStr = length;
+		this.modified = null;
+		this.modifiedStr = modified;
+		this.isFile = isFile;
+	}
+	
 	public String toString() {
-		return "Name : " + name + "\nLength: " + length + "\nData modified: " + modified + "\nisFile : " + isFile; 
+		if(modified == null){
+			return "Name : " + name + "\nLength: " + length + "\nData modified: " 
+							+ modifiedStr + "\nisFile : " + isFile; 
+		}
+		return "Name : " + name + "\nLength: " + length + "\nData modified: " 
+							+ modified + "\nisFile : " + isFile; 
 	}
 }
