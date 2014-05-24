@@ -20,6 +20,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import javax.xml.ws.WebServiceException;
+
+import netutils.NetUtils;
+
 import contactserver.IContactServer;
 import fileclient.ws.InfoNotFoundException_Exception;
 import fileclient.ws.UserPermissionException_Exception;
@@ -49,7 +53,7 @@ public class FileClient
 	
 	private String discoverContactSrvURL() throws IOException {
 		InetAddress group = InetAddress.getByName(IContactServer.MULTICAST_ADDRESS);
-		DatagramSocket ds = new DatagramSocket(IContactServer.UDP_PORT);
+		DatagramSocket ds = NetUtils.assignUDPSocket(IContactServer.UDP_PORT);
 		ds.setSoTimeout(2000); //2 seconds
 		for(int i=0; i<3;i++){
 			try{
@@ -180,7 +184,7 @@ public class FileClient
 					return true;
 				}
 			} 
-			catch(RemoteException e){
+			catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} 
 		}
@@ -220,7 +224,7 @@ public class FileClient
 					return true;
 				}
 			} 
-			catch(RemoteException e){
+			catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} 
 		}
@@ -269,7 +273,7 @@ public class FileClient
 					if(fserver == null) return null;
 					return fserver.dir(dir,username);
 				}
-			} catch(RemoteException e){
+			} catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} catch(InfoNotFoundException e) {
 				System.out.println(e.getMessage());
@@ -318,7 +322,7 @@ public class FileClient
 					if(fserver == null) return false;
 					return fserver.mkdir(dir,username);
 				}
-			} catch(RemoteException e){
+			} catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} catch(UserPermissionException e){
 				System.out.println("Request denied: user not permitted.\n");
@@ -364,7 +368,7 @@ public class FileClient
 					if(fserver == null) return false;
 					return fserver.rmdir(dir,username);
 				}
-			} catch(RemoteException e){
+			} catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} catch(UserPermissionException e){
 				System.out.println("Request denied: user not permitted.\n");
@@ -410,7 +414,7 @@ public class FileClient
 					if(fserver == null) return false;
 					return fserver.rm(path,username);
 				}
-			} catch(RemoteException e){
+			} catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} catch(UserPermissionException e){
 				System.out.println("Request denied: user not permitted.\n");
@@ -459,7 +463,7 @@ public class FileClient
 					if(fserver == null) return null;
 					return fserver.getFileInfo(path, username);
 				}
-			} catch(RemoteException e){
+			} catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} catch (InfoNotFoundException e) {
 				System.out.println(e.getMessage());
@@ -550,7 +554,7 @@ public class FileClient
 					}
 				}
 				
-			} catch(RemoteException e){
+			} catch(RemoteException | WebServiceException e){
 				System.out.println("Unable to invoke remote operation. Retrying...");	
 			} catch (UserPermissionException e) {
 				System.out.println("Request to server "+e.getMessage()+" denied:" +

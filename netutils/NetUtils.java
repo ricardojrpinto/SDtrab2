@@ -1,5 +1,7 @@
 package netutils;
 
+import java.io.IOException;
+import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -21,5 +23,24 @@ public class NetUtils {
 			}
 		} 
 		return null;
+	}
+	
+	public static DatagramSocket assignUDPSocket(int port) throws IOException{
+		System.out.println("Attempting to bind socket...");
+		int tries = 100;
+		DatagramSocket ds = null;
+		boolean assigned = true;
+		while(!assigned){
+			if(tries == 0)
+				throw new IOException("Unable to bind datagram socket.");
+			try{
+				ds = new DatagramSocket(port);
+			} catch(SocketException e){
+				port++;
+				tries--;
+			}
+		}
+		System.out.println("Binding successful.");
+		return ds;
 	}
 }

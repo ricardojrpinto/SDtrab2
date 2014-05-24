@@ -1,9 +1,11 @@
 package restproxy;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -16,6 +18,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Scanner;
+
+import netutils.NetUtils;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -30,9 +34,8 @@ import org.scribe.model.Verb;
 import org.scribe.model.Verifier;
 import org.scribe.oauth.OAuthService;
 
-import netutils.NetUtils;
-import contactserver.IContactServer;
 
+import contactserver.IContactServer;
 import fileserver.IFileServer;
 import fileserver.IFileServerInfo;
 import fileserver.RMIFileServerInfo;
@@ -40,27 +43,43 @@ import fileserver.UserPermissionException;
 import fileutils.FileInfo;
 import fileutils.InfoNotFoundException;
 
-public class DropboxRESTProxy implements IFileServer {
+public class DropboxRESTProxy extends AbstractRESTProxy implements IFileServer {
 
-	private static transient final String API_KEY = "cjnly006g3y0kpv";
-	private static transient final String API_SECRET = "d0zn4p29roxkh1p";
-	private static transient final String SCOPE = "dropbox";
-	private static transient final String AUTHORIZE_URL = "https://www.dropbox.com/1/oauth/authorize?oauth_token=";
+	private static final String API_KEY = "cjnly006g3y0kpv";
+	private static final String API_SECRET = "d0zn4p29roxkh1p";
+	private static final String SCOPE = "dropbox";
+	private static final String AUTHORIZE_URL = "https://www.dropbox.com/1/oauth/authorize?oauth_token=";
+	private static final String TOKEN_FILENAME = "dropbox_token";
+	
 	private static final int INT_SIZE = 4;
-	private transient OAuthService oauthService;
-	private transient Token accessToken;
+	private OAuthService oauthService;
+	private Token accessToken;
 	
 	private IFileServerInfo fsinfo;
 	
+	
+	
 	protected DropboxRESTProxy(String servername,String username, String url) throws RemoteException{
 		fsinfo = new RMIFileServerInfo(servername, username, url);
-		this.getAPItokens();
+		gettingToken = false;
+		this.getAccessToken();
 	}
 	
-	private void getAPItokens(){
+	protected void getAccessToken(){
 		oauthService = new ServiceBuilder().provider(DropBoxApi.class).apiKey(API_KEY)
 				.apiSecret(API_SECRET).scope(SCOPE).build();
 
+		File tokenFile = new File(TOKEN_FILENAME);
+		if(tokenFile.exists()){
+			try{
+				ObjectInputStream tokenInputStream = new ObjectInputStream(new FileInputStream(tokenFile));
+				accessToken = (Token) tokenInputStream.readObject();
+				tokenInputStream.close();
+				return;
+			} catch (IOException | ClassNotFoundException  e){
+				System.err.println(e.getMessage());
+			}
+		}
 		// Obter Request token
 		Token requestToken = oauthService.getRequestToken();
 		
@@ -72,7 +91,22 @@ public class DropboxRESTProxy implements IFileServer {
 		
 		Verifier verifier = new Verifier(requestToken.getSecret());
 		accessToken = oauthService.getAccessToken(requestToken, verifier);
+		
+		try {
+			ObjectOutputStream tokenOutStream = new ObjectOutputStream(new FileOutputStream(tokenFile));
+			tokenOutStream.writeObject(accessToken);
+			
+			//Since the token contains the secret, it would be best 
+			//to encrypt it or provide tight access control to the file storing it.
+			//For simplicity's sake, we ignore this security measure.
+			
+			tokenOutStream.close();
+		} catch (IOException e) {
+			tokenFile.delete(); 
+		}
 	}
+	
+	
 	
 	@Override
 	public IFileServerInfo getServerInfo(){
@@ -94,150 +128,137 @@ public class DropboxRESTProxy implements IFileServer {
 	public String[] dir(String path, String username) throws RemoteException,
 			InfoNotFoundException, UserPermissionException {
 		verifyPermission(username);
-		OAuthRequest request = new OAuthRequest(Verb.GET, "https://api.dropbox.com/1/metadata/dropbox/"+path+"?list=true");
-		oauthService.signRequest(accessToken, request);
-		Response response = request.send();
-		
-		if (response.getCode() != 200){
-			System.err.println(response.getCode());
-			return null;
-		}
-		
-		JSONParser parser = new JSONParser();
-		JSONObject res;
-		try {
-			res = (JSONObject) parser.parse(response.getBody());
+		try{
+			OAuthRequest request = new OAuthRequest(Verb.GET, "https://api.dropbox.com/1/metadata/dropbox/"+path+"?list=true");
+			oauthService.signRequest(accessToken, request);
+			Response response = request.send();
+			
+			if (response.getCode() != 200){
+				throw new ResponseCodeException(""+response.getCode());
+			}
+			
+			JSONParser parser = new JSONParser();
+			JSONObject res = (JSONObject) parser.parse(response.getBody());
+			JSONArray items = (JSONArray) res.get("contents");
+			List<String> files = new ArrayList<String>();
+			Iterator it = items.iterator();
+			while(it.hasNext()){
+				String next = ((String)((JSONObject)it.next()).get("path"));
+				files.add(next.substring(next.lastIndexOf('/')+1));
+			}
+			
+			return files.toArray(new String[0]);	//the argument only serves to identify the parameterized type
+			
+		} catch(ResponseCodeException e){
+			handleResponseCodeException(e);
 		} catch (ParseException e) {
-			e.printStackTrace();
-			return null;
+			System.err.println("Error: "+e.getMessage());
 		}
-		JSONArray items = (JSONArray) res.get("contents");
-		List<String> files = new ArrayList<String>();
-		Iterator it = items.iterator();
-		
-		while(it.hasNext()){
-			String next = ((String)((JSONObject)it.next()).get("path"));
-			files.add(next.substring(next.lastIndexOf('/')+1));
-		}
-		return files.toArray(new String[0]);	//the argument only serves to identify the parameterized type
+		return null;
 	}
 
 	@Override
 	public FileInfo getFileInfo(String path, String username)
 			throws InfoNotFoundException, UserPermissionException {
 		verifyPermission(username);
-		OAuthRequest request = new OAuthRequest(Verb.GET, "https://api.dropbox.com/1/metadata/dropbox/"+path);
-		oauthService.signRequest(accessToken, request);
-		Response response = request.send();
-
-		if (response.getCode() != 200){
-			if(response.getCode() == 404)
-				throw new InfoNotFoundException("File not found :" + path);
-			System.err.println("Error: "+ response.getCode());
-			return null;
-		}
-
 		try{
+			OAuthRequest request = new OAuthRequest(Verb.GET, "https://api.dropbox.com/1/metadata/dropbox/"+path);
+			oauthService.signRequest(accessToken, request);
+			Response response = request.send();
+	
+			if (response.getCode() != 200){
+				throw new ResponseCodeException(""+response.getCode());
+			}
+
 			JSONParser parser = new JSONParser();
 			JSONObject res = (JSONObject) parser.parse(response.getBody());
 			String filepath = (String) res.get("path");
 			String size = (String) res.get("size");
 			String modified = (String) res.get("modified");
 			boolean isDir =  (Boolean)res.get("is_dir");
+			
 			return new FileInfo(filepath.substring(filepath.lastIndexOf('/')+1),size,modified,isDir);
+			
+		} catch(ResponseCodeException e){
+			if(e.getMessage().contains("404"))
+				throw new InfoNotFoundException("File not found :" + path);
+			handleResponseCodeException(e);
 		} catch(ParseException e){
 			System.err.println("Error: "+e.getMessage());
-			return null;
 		}
+		return null;
 	}
 
 	@Override
 	public byte[] downloadFile(String path, String username)
 			throws UserPermissionException  {
 		verifyPermission(username);
-		OAuthRequest request = new OAuthRequest(Verb.GET, 
-				"https://api-content.dropbox.com/1/files/dropbox/"+path);
-		oauthService.signRequest(accessToken, request);
-		Response response = request.send();
-
-		if (response.getCode() != 200){
-			System.err.println("Error: "+ response.getCode());
-			return null;
-		}
-		
-		JSONParser parser = new JSONParser();
-		byte[] data;
-		try {
+		try{
+			OAuthRequest request = new OAuthRequest(Verb.GET, 
+					"https://api-content.dropbox.com/1/files/dropbox/"+path);
+			oauthService.signRequest(accessToken, request);
+			Response response = request.send();
+	
+			if (response.getCode() != 200){
+				throw new ResponseCodeException(""+response.getCode());
+			}
+			
+			JSONParser parser = new JSONParser();
 			JSONObject res = (JSONObject) parser.parse(response.getHeader("x-dropbox-metadata"));
-			data = new byte[((Long)res.get("bytes")).intValue()];
+			byte[] data = new byte[((Long)res.get("bytes")).intValue()];
 			response.getStream().read(data);
+			
+			return data;
+		} catch(ResponseCodeException e){
+			handleResponseCodeException(e);
 		} catch (IOException | ParseException e) {
 			System.err.println("Error: "+e.getMessage());
-			return null;
 		}
-		return data;
+		return null;
 	}
 
 	@Override
 	public boolean uploadFile(String path, byte[] content, String username)
 			throws UserPermissionException {
 		verifyPermission(username);
-		OAuthRequest request = new OAuthRequest(Verb.PUT, 
-				"https://api-content.dropbox.com/1/files_put/dropbox/"+path);
-		
-		request.addHeader("Content-Length", Integer.toString(content.length*INT_SIZE));
-		//request.addHeader("Content-Type", this.getContentType(path));	
-		request.addHeader("Content-Type", "application/octet-stream");	
-		request.addPayload(content);
-
-		oauthService.signRequest(accessToken, request);
-		Response response = request.send();
-		if (response.getCode() != 200){
-			System.err.println("Error: "+ response.getCode());
-			return false;
+		try{
+			OAuthRequest request = new OAuthRequest(Verb.PUT, 
+					"https://api-content.dropbox.com/1/files_put/dropbox/"+path);
+			
+			request.addHeader("Content-Length", Integer.toString(content.length*INT_SIZE));
+			request.addHeader("Content-Type", getMimeType(path));	
+			request.addPayload(content);
+	
+			oauthService.signRequest(accessToken, request);
+			Response response = request.send();
+			if (response.getCode() != 200){
+				throw new ResponseCodeException(""+response.getCode());
+			}
+			return true;
+		} catch (ResponseCodeException e) {
+			handleResponseCodeException(e);
 		}
-		return true;
-		
+		return false;
 	}
 	
 	
-	/*
-	 * Supported MIME content types:
-	 * 	-application/octet-stream (default)
-	 * 	-application/pdf
-	 * 	-application/zip
-	 * 	-text/plain
-	 * 	-image/gif
-	 * 	-image/jpeg
-	 * 	-image/png
-	 */
-//	protected String getContentType(String path) {
-//		String format = path.substring(path.lastIndexOf('.')+1);
-//		switch(format){
-//		default: return "application/octet-stream";
-//		case "pdf": return "application/pdf";
-//		case "txt":
-//		case "java":
-//			return "text/plain";
-//		case "zip":
-//			return "application/zip";
-//		
-//		}
-//	}
-
 	@Override
 	public boolean mkdir(String path, String username) throws UserPermissionException {
 		verifyPermission(username);
-		OAuthRequest request = new OAuthRequest(Verb.POST, 
-				"https://api.dropbox.com/1/fileops/create_folder?root=dropbox&path="+path);
-		
-		oauthService.signRequest(accessToken, request);
-		Response response = request.send();
-		if (response.getCode() != 200){
-			System.err.println("Error: "+ response.getCode());
-			return false;
+		try{
+			OAuthRequest request = new OAuthRequest(Verb.POST, 
+					"https://api.dropbox.com/1/fileops/create_folder?root=dropbox&path="+path);
+			
+			oauthService.signRequest(accessToken, request);
+			Response response = request.send();
+			if (response.getCode() != 200){
+				throw new ResponseCodeException(""+response.getCode());
+			}
+			return true;
+		} catch (ResponseCodeException e) {
+			handleResponseCodeException(e);
 		}
-		return true;
+		return false;
 	}
 
 	@Override
@@ -249,19 +270,35 @@ public class DropboxRESTProxy implements IFileServer {
 	@Override
 	public boolean rm(String path, String username) throws UserPermissionException {
 		verifyPermission(username);
-		OAuthRequest request = new OAuthRequest(Verb.POST, 
-				"https://api.dropbox.com/1/fileops/delete?root=dropbox&path="+path);
-		
-		oauthService.signRequest(accessToken, request);
-		Response response = request.send();
-
-		if (response.getCode() != 200){
-			System.err.println("Error: "+ response.getCode());
-			return false;
+		try{
+			OAuthRequest request = new OAuthRequest(Verb.POST, 
+					"https://api.dropbox.com/1/fileops/delete?root=dropbox&path="+path);
+			
+			oauthService.signRequest(accessToken, request);
+			Response response = request.send();
+	
+			if (response.getCode() != 200){
+				throw new ResponseCodeException(""+response.getCode());
+			}
+			return true;
+		} catch (ResponseCodeException e) {
+			handleResponseCodeException(e);
+			
 		}
-		return true;
+		return false;
 	}
 	
+	
+	protected void handleResponseCodeException(ResponseCodeException e) {
+		if(e.getMessage() != null 
+				&& e.getMessage().contains("401")
+					&& !gettingToken){
+			new File(TOKEN_FILENAME).delete();
+			gettingToken = true;
+			new TokenFetcher().start();
+		}
+	}
+
 	protected void verifyPermission(String user) throws UserPermissionException {
 
 		try {
@@ -278,13 +315,13 @@ public class DropboxRESTProxy implements IFileServer {
 	public static void main( String args[]) throws Exception {
 		try {
 			if( args.length != 2){
-				System.err.println("Usage: java RESTProxy <server_name> " +
+				System.err.println("Usage: java DropboxRESTProxy <server_name> " +
 						"<user_name>");
 				return;
 			}
 			
 			String servername = args[0];
-			//String contactserverURL = discoverContactSrvURL();
+			//TODO String contactserverURL = discoverContactSrvURL();
 			String contactserverURL = "localhost";
 			String username = args[1];
 			String url = NetUtils.fetchIPAddress();
@@ -326,27 +363,6 @@ public class DropboxRESTProxy implements IFileServer {
 		}
 	}
 	
-	private static String discoverContactSrvURL() throws IOException {
-		InetAddress group = InetAddress.getByName(IContactServer.MULTICAST_ADDRESS);
-		DatagramSocket ds = new DatagramSocket(IContactServer.UDP_PORT);
-		ds.setSoTimeout(2000); //2 seconds
-		for(int i=0; i<3;i++){
-			try{
-				byte[] buf = "REQ".getBytes();
-				DatagramPacket sendPkt = new DatagramPacket(buf, buf.length,group,IContactServer.MULTICAST_PORT);
-				ds.send(sendPkt);
-				buf = new byte[3];
-				DatagramPacket rcv = new DatagramPacket(buf, buf.length);
-				ds.receive(rcv);
-				String reply = new String(rcv.getData());
-				if(reply.equals("RPL")){
-					return rcv.getAddress().getHostAddress();
-				}
-			} catch(SocketTimeoutException e){
-				//keep trying
-			}
-		}
-		return null;
-	}
+	
 
 }

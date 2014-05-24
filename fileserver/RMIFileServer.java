@@ -205,7 +205,7 @@ public class RMIFileServer
 	
 	private static String discoverContactSrvURL() throws IOException {
 		InetAddress group = InetAddress.getByName(IContactServer.MULTICAST_ADDRESS);
-		DatagramSocket ds = new DatagramSocket(IContactServer.UDP_PORT);
+		DatagramSocket ds = NetUtils.assignUDPSocket(IContactServer.UDP_PORT);
 		ds.setSoTimeout(2000); //2 seconds
 		for(int i=0; i<3;i++){
 			try{

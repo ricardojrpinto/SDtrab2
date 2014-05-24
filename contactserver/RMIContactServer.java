@@ -78,7 +78,7 @@ public class RMIContactServer extends UnicastRemoteObject implements
 							}
 						}
 						for(String s: toRemove){
-							RMIfileServers.remove(s);
+							WSfileServers.remove(s);
 						}
 					}
 				} catch (InterruptedException e1) {
